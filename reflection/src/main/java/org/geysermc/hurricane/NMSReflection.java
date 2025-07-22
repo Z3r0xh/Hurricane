@@ -11,7 +11,27 @@ public final class NMSReflection {
     public static boolean mojmap = true;
 
     public static String getVersion() {
-        return version == null ? version = Bukkit.getServer().getClass().getPackage().getName().split("\\.")[3] : version;
+        if (version != null) {
+            return version;
+        }
+        
+        try {
+            String packageName = Bukkit.getServer().getClass().getPackage().getName();
+            String[] parts = packageName.split("\\.");
+            
+            // Para versiones modernas (1.17+) que usan Mojmap, no hay versión en el paquete
+            if (parts.length < 4) {
+                version = "modern"; // Indicador para versiones modernas
+                return version;
+            }
+            
+            version = parts[3];
+            return version;
+        } catch (Exception e) {
+            // Si falla, asumimos versión moderna
+            version = "modern";
+            return version;
+        }
     }
 
     /**
@@ -33,8 +53,26 @@ public final class NMSReflection {
 
         // Else Mojmap/post-1.17 is not in effect
         mojmap = false;
+        String serverVersion = getVersion();
+        
+        // Para versiones modernas que no tienen el formato antiguo
+        if ("modern".equals(serverVersion)) {
+            // Intentar con Mojmap directamente
+            try {
+                return Class.forName("net.minecraft." + post1_16Prefix.replace("/", ".") + "." + name);
+            } catch (ClassNotFoundException e) {
+                // Si falla, intentar sin prefijo
+                try {
+                    return Class.forName("net.minecraft." + name);
+                } catch (ClassNotFoundException ex) {
+                    ex.printStackTrace();
+                    return null;
+                }
+            }
+        }
+        
         try {
-            return Class.forName("net.minecraft.server." + getVersion() + "." + name);
+            return Class.forName("net.minecraft.server." + serverVersion + "." + name);
         } catch (ClassNotFoundException ex) {
             ex.printStackTrace();
             return null;
