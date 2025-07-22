@@ -7,19 +7,19 @@ plugins {
 tasks {
     jar {
         archiveClassifier.set("unshaded")
-        archiveVersion.set("")
+        archiveVersion.set(project.version.toString())
     }
 
     shadowJar {
         archiveClassifier.set("shaded")
-        archiveVersion.set("")
+        archiveVersion.set(project.version.toString())
     }
 
     downgradeJar {
         mustRunAfter(shadowJar)
         inputFile.set(shadowJar.get().archiveFile)
         archiveClassifier.set("")
-        archiveVersion.set("")
+        archiveVersion.set(project.version.toString())
     }
 
     build {
