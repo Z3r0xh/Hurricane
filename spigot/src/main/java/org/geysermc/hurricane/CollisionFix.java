@@ -31,20 +31,42 @@ public final class CollisionFix implements Listener {
         this.bambooEnabled = bambooEnabled;
         this.pointedDripstoneEnabled = pointedDripstoneEnabled;
 
+        // Log server version information
+        String serverVersion = plugin.getServer().getVersion();
+        plugin.getLogger().info("Server version: " + serverVersion);
+
         if (bambooEnabled) {
             try {
                 final Class<?> bambooBlockClass = NMSReflection.getNMSClass("world.level.block", "BlockBamboo");
                 final boolean newerThanOrEqualTo1170 = NMSReflection.mojmap;
                 // Codec field being first bumps all fields - as of 1.20.4
                 final boolean newerThanOrEqualTo1204 = Arrays.stream(bambooBlockClass.getFields()).anyMatch(field -> field.getType().getSimpleName().equals("MapCodec"));
-                final boolean newerThanOrEqualTo1215 = NMSReflection.getNMSClass("world.level.block", "LeafLitterBlock") != null;
-                final Field bambooBoundingBox = ReflectionAPI.getFieldAccessible(bambooBlockClass, newerThanOrEqualTo1215 ? "S" : newerThanOrEqualTo1204 ? "g" : newerThanOrEqualTo1170 ? "f" : "c"); // Bounding box for "no leaves", according to Yarn.
-                applyNoBoundingBox(bambooBoundingBox);
-                plugin.getLogger().info("Bamboo collision hack enabled.");
+                final boolean newerThanOrEqualTo1215 = checkClassExists("world.level.block", "LeafLitterBlock");
+                
+                plugin.getLogger().info("Version detection - 1.17.0+: " + newerThanOrEqualTo1170 + 
+                    ", 1.20.4+: " + newerThanOrEqualTo1204 + ", 1.21.5+: " + newerThanOrEqualTo1215);
+                
+                String fieldName = newerThanOrEqualTo1215 ? "S" : newerThanOrEqualTo1204 ? "g" : newerThanOrEqualTo1170 ? "f" : "c";
+                plugin.getLogger().info("Attempting to access bamboo field: " + fieldName);
+                
+                final Field bambooBoundingBox = ReflectionAPI.getFieldAccessible(bambooBlockClass, fieldName);
+                
+                // Verificar el tipo del campo antes de aplicar el fix
+                String fieldType = bambooBoundingBox.getType().getSimpleName();
+                plugin.getLogger().info("Bamboo field type detected: " + fieldType);
+                
+                boolean success = applyNoBoundingBox(bambooBoundingBox, plugin);
+                if (success) {
+                    plugin.getLogger().info("Bamboo collision hack enabled.");
+                } else {
+                    plugin.getLogger().warning("Bamboo collision hack failed - unsupported field type: " + fieldType);
+                }
             } catch (Exception e) {
+                plugin.getLogger().severe("Error enabling bamboo collision hack: " + e.getMessage());
                 e.printStackTrace();
             }
         }
+        
         if (pointedDripstoneEnabled) {
             // We need to disable all dripstone collision, and there's six...
             try {
@@ -53,6 +75,8 @@ public final class CollisionFix implements Listener {
                 // There is one we do not need to touch (1.18+) because it doesn't deal with collision.
                 boolean foundBoundingBoxes = false;
                 int boundingBoxCount = 0;
+                int successCount = 0;
+                
                 for (Field field : dripstoneBlockClass.getDeclaredFields()) {
                     if (boundingBoxCount >= 6) {
                         // Don't apply more than necessary
@@ -61,13 +85,17 @@ public final class CollisionFix implements Listener {
                     if (Modifier.isStatic(field.getModifiers()) && field.getType().getSimpleName().equals("VoxelShape")) {
                         foundBoundingBoxes = true;
                         boundingBoxCount++;
-                        applyNoBoundingBox(field);
+                        boolean success = applyNoBoundingBox(field, plugin);
+                        if (success) {
+                            successCount++;
+                        }
                     } else if (foundBoundingBoxes) {
                         break;
                     }
                 }
-                plugin.getLogger().info("Dripstone collision hack enabled.");
+                plugin.getLogger().info("Dripstone collision hack enabled (" + successCount + "/" + boundingBoxCount + " fields modified).");
             } catch (Exception e) {
+                plugin.getLogger().severe("Error enabling dripstone collision hack: " + e.getMessage());
                 e.printStackTrace();
             }
         }
@@ -124,29 +152,60 @@ public final class CollisionFix implements Listener {
         return new BoundingBox(minX / 16D, minY / 16D, minZ / 16D, maxX / 16D, maxY / 16D, maxZ / 16D);
     }
 
-    private static void applyNoBoundingBox(Field field) throws NoSuchMethodException, IllegalAccessException,
-            InvocationTargetException, InstantiationException {
-        final double x1 = 0, y1 = 0, z1 = 0, x2 = 0, y2 = 0, z2 = 0;
-        if (field.getType().getSimpleName().equals("AxisAlignedBB")) {
-            Class<?> boundingBoxClass = field.getType();
-            Constructor<?> boundingBoxConstructor = boundingBoxClass.getConstructor(double.class, double.class, double.class,
-                    double.class, double.class, double.class);
-            Object boundingBox = boundingBoxConstructor.newInstance(x1, y1, z1, x2, y2, z2);
-            ReflectionAPI.setFinalValue(field, boundingBox);
-        } else if (field.getType().getSimpleName().equals("VoxelShape")) {
-            Method createVoxelShape;
+    /**
+     * Verifica silenciosamente si una clase existe sin generar warnings en los logs
+     */
+    private static boolean checkClassExists(String packageName, String className) {
+        try {
+            // Intentar con Mojmap primero
+            Class.forName("net.minecraft." + packageName + "." + className);
+            return true;
+        } catch (ClassNotFoundException e) {
             try {
-                // 1.18+ - obfuscated methods
-                createVoxelShape = ReflectionAPI.getMethod(NMSReflection.getNMSClass("world.phys.shapes", "VoxelShapes"), "b",
-                        double.class, double.class, double.class, double.class, double.class, double.class);
-            } catch (NoSuchMethodException e) {
-                createVoxelShape = ReflectionAPI.getMethod(NMSReflection.getNMSClass("world.phys.shapes", "VoxelShapes"), "create",
-                        double.class, double.class, double.class, double.class, double.class, double.class);
+                // Intentar directamente
+                Class.forName("net.minecraft." + className);
+                return true;
+            } catch (ClassNotFoundException ex) {
+                // No existe, pero no loggeamos el error
+                return false;
             }
-            Object boundingBox = ReflectionAPI.invokeMethod(createVoxelShape, x1, y1, z1, x2, y2, z2);
-            ReflectionAPI.setFinalValue(field, boundingBox);
-        } else {
-            throw new IllegalStateException();
+        }
+    }
+
+    private static boolean applyNoBoundingBox(Field field, Plugin plugin) {
+        try {
+            final double x1 = 0, y1 = 0, z1 = 0, x2 = 0, y2 = 0, z2 = 0;
+            String fieldTypeName = field.getType().getSimpleName();
+            
+            if (fieldTypeName.equals("AxisAlignedBB")) {
+                Class<?> boundingBoxClass = field.getType();
+                Constructor<?> boundingBoxConstructor = boundingBoxClass.getConstructor(double.class, double.class, double.class,
+                        double.class, double.class, double.class);
+                Object boundingBox = boundingBoxConstructor.newInstance(x1, y1, z1, x2, y2, z2);
+                ReflectionAPI.setFinalValue(field, boundingBox);
+                return true;
+            } else if (fieldTypeName.equals("VoxelShape")) {
+                Method createVoxelShape;
+                try {
+                    // 1.18+ - obfuscated methods
+                    createVoxelShape = ReflectionAPI.getMethod(NMSReflection.getNMSClass("world.phys.shapes", "VoxelShapes"), "b",
+                            double.class, double.class, double.class, double.class, double.class, double.class);
+                } catch (NoSuchMethodException e) {
+                    createVoxelShape = ReflectionAPI.getMethod(NMSReflection.getNMSClass("world.phys.shapes", "VoxelShapes"), "create",
+                            double.class, double.class, double.class, double.class, double.class, double.class);
+                }
+                Object boundingBox = ReflectionAPI.invokeMethod(createVoxelShape, x1, y1, z1, x2, y2, z2);
+                ReflectionAPI.setFinalValue(field, boundingBox);
+                return true;
+            } else {
+                // Log información sobre el tipo desconocido para debugging
+                plugin.getLogger().warning("Unknown field type for collision fix: " + fieldTypeName + 
+                    " (Full type: " + field.getType().getName() + ")");
+                return false;
+            }
+        } catch (Exception e) {
+            plugin.getLogger().severe("Failed to apply no bounding box to field " + field.getName() + ": " + e.getMessage());
+            return false;
         }
     }
 }
