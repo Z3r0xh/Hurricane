@@ -2,6 +2,7 @@ name: Hurricane
 version: ${version}
 main: org.geysermc.hurricane.Hurricane
 api-version: 1.13
-authors: [ GeyserMC ]
+authors: [ GeyserMC, Z3r0x ]
+description: "Hurricane - Collision Fix Plugin v2.2.0 - Fixes bamboo and dripstone collision issues for smooth gameplay"
 folia-supported: true
 softdepend: [Geyser-Spigot, floodgate]
